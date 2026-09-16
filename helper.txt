@@ -1,0 +1,35 @@
+docker pull pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel  <- untuk kebutuhan pytorch cuda
+
+
+docker run -it --gpus all -v "$(pwd):/workspace" pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel bash <- untuk masuk tanpa folder
+
+
+docker run -it --gpus all -p 8888:8888 -v "C:\\Users\\Axioo Pongo\\Downloads\\Download Mozilla\\File Kuliah\\Semester 7\\Skripsi\\Tes Library:/workspace" pytorch/pytorch:2.6.0-cuda12.6-cudnn9-devel
+
+exit 
+
+pip install jupyterlab
+
+jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+
+docker commit 0c844a50eb78 mamba-ready-for-myself:v1 <- ini buat simpan (idnya sesuai docker yang berjalan)
+
+docker save -o mamba_ready_for_myself_v1.tar mamba-ready-for-myself:v1 <- ini buat backup
+
+docker run --gpus all -it --ipc=host -p 8888:8888 -v "%cd%:/workspace" mamba-ready-for-myself:v1 bash <- ini buat jalanin
+
+docker run -it --gpus all --ipc=host -p 8888:8888 -v "%cd%:/workspace" --shm-size="8g" mamba-ready-for-myself:v1 bash <- untuk run cmd
+
+docker run -it --gpus all --ipc=host -p 8888:8888 -v "${PWD}:/workspace" --shm-size="8g" mamba-ready-for-myself:v1 bash <- untuk run powershell
+
+-p 8888:8888 khusus jupyter
+
+ini command tanpa jupyter untuk powershell:
+
+docker run -it --gpus all --ipc=host -v "${PWD}:/workspace" --shm-size="8g" mamba-ready-for-myself:v1 bash 
+
+pip cache purge <- clean cache pip
+apt-get clean <- clean cache
+
+docker image prune
+
