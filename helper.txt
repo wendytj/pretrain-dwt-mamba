@@ -33,3 +33,33 @@ apt-get clean <- clean cache
 
 docker image prune
 
+
+
+https://drive.google.com/file/d/1y-CjRsE9K9MbVQMPR2nN_MHdQ9fiKGV_/view?usp=sharing
+
+apt update && apt install aria2 -y
+
+CONFIRM=$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies --no-check-certificate "https://docs.google.com/uc?export=download&id=$FILEID" -O- | sed -rn 's/.*confirm=([0-9A-Za-z_]+).*/\1\n/p')
+
+
+apt-get update && apt-get install -y speedtest-cli
+speedtest-cli
+
+cd /workspace
+git clone https://github.com/wendytj/pretrain-dwt-mamba.git
+cd pretrain-dwt-mamba
+pip install --no-deps https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.7.0/causal_conv1d-1.7.0+cu12torch2.6cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+pip install --no-deps https://github.com/state-spaces/mamba/releases/download/v2.3.2.post1/mamba_ssm-2.3.2.post1+cu12torch2.6cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
+pip install einops huggingface_hub transformers pandas scikit-learn matplotlib seaborn gdown
+gdown --fuzzy "https://drive.google.com/file/d/1y-CjRsE9K9MbVQMPR2nN_MHdQ9fiKGV_/view?usp=sharing" -O data/organcmnist_224.npz
+
+
+aria2c -x 16 -s 16 --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=$CONFIRM&id=$FILEID" -d $DIR -o organcmnist_224.npz
+
+
+pip install --no-deps triton
+
+
+
+
+

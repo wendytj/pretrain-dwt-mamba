@@ -8,7 +8,7 @@ class OrganCMNISTDataset(Dataset):
   """Dataset loader presisi untuk file NPZ pre-rendered 224x224."""
 
   def __init__(self, npz_path, split="train"):
-    data = np.load(npz_path)
+    data = np.load(npz_path, allow_pickle=True)
     # Shape asli uint8: (N, 224, 224) atau (N, 224, 224, 1)
     raw_images = data[f"{split}_images"]
     labels = data[f"{split}_labels"].squeeze()
