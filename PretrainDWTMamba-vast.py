@@ -20,6 +20,38 @@ from architectures.DWTMamba import DWTMamba
 from logger import ExperimentLogger
 from tqdm import tqdm
 
+CONFIG = {
+    "experiment_code": "exp-organcmnist-dwtmamba-v1",
+    "seed": 42,
+    
+    "npz_path": "data/organcmnist_224.npz",
+    "batch_size": 16,
+    "eval_batch_size": 256,
+    "accumulation_steps": 1,
+    "num_workers": 12,
+    "img_size": 224,
+    
+    # Arsitektur DWT-Mamba
+    "in_channels": 1,
+    "embed_dim": 768,
+    "depth": 4,
+    "mamba_d_state": 16,
+    "mamba_d_conv": 4,
+    "mamba_expand": 2,
+    "se_reduction": 16,
+    "mb_gsf_reduction": 4,
+    "latent_dim": 128,
+    "proj_dim": 256,
+    
+    "optimizer": "Adam",
+    "learning_rate": 1e-4,
+    "weight_decay": 1e-4,
+    "max_epochs": 1,
+    "early_stop_patience": 10,
+    "early_stop_delta": 0.001,
+}
+
+
 def run_mock_test(model, train_loader, device, gpu_transform):
     """Pengujian simulasi (Dry-Run) 1 batch untuk memastikan kelancaran VRAM dan shape."""
     print("\n🔍 Memulai Mock Test (Dry-Run 1 Batch)...")
@@ -253,9 +285,11 @@ def main():
     train_loader, val_loader, test_loader, num_classes, gpu_train_transform, gpu_eval_transform = get_organcmnist_loaders(
         npz_path=CONFIG["npz_path"],
         batch_size=CONFIG["batch_size"],
+        eval_batch_size=CONFIG["eval_batch_size"],
         num_workers=CONFIG["num_workers"],
         img_size=CONFIG["img_size"]
     )
+    
     CONFIG["num_classes"] = num_classes
     class_names = ['bladder', 'femur-left', 'femur-right', 'heart', 'kidney-left', 'kidney-right', 'liver', 'lung-left', 'lung-right', 'pancreas', 'spleen']
 
@@ -283,17 +317,13 @@ def main():
 
     raw_model = model
 
-    if hasattr(torch, 'compile'):
-        print("⚡ Mengaktifkan PyTorch 2.0 Torch Compile...")
-        model = torch.compile(model)
-
     # 4. Mode Percabangan: Dry-Run vs Full Training
-    if args.dry_run:
-        run_mock_test(model, train_loader, device, gpu_eval_transform)
-        print("💡 Mode --dry_run selesai. Program keluar tanpa melakukan pelatihan.")
-        return
 
     run_mock_test(model, train_loader, device, gpu_eval_transform,)
+
+    if args.dry_run:
+        print("💡 Mode --dry_run selesai. Program keluar tanpa melakukan pelatihan.")
+        return
 
     gc.collect()
     torch.cuda.empty_cache()
@@ -305,36 +335,6 @@ def main():
 
     run_training_pipeline(model, raw_model, loaders, transforms, amp_params, logger, device)
 
-CONFIG = {
-    "experiment_code": "exp-organcmnist-dwtmamba-v1",
-    "seed": 42,
-    
-    "npz_path": "data/organcmnist_224.npz",
-    "batch_size": 16,
-    "accumulation_steps": 1,
-    "num_workers": 12,
-    "img_size": 224,
-    
-    # Arsitektur DWT-Mamba
-    "in_channels": 1,
-    "embed_dim": 768,
-    "depth": 4,
-    "mamba_d_state": 16,
-    "mamba_d_conv": 4,
-    "mamba_expand": 2,
-    "se_reduction": 16,
-    "mb_gsf_reduction": 4,
-    "latent_dim": 128,
-    "proj_dim": 256,
-    
-    "optimizer": "Adam",
-    "learning_rate": 1e-4,
-    "weight_decay": 1e-4,
-    "max_epochs": 1,
-    "early_stop_patience": 10,
-    "early_stop_delta": 0.001,
-}
-
 def parse_args():
     parser = argparse.ArgumentParser(description="DWT-Mamba Modular Training & Dry-Run Pipeline")
     parser.add_argument("--batch_size", type=int, default=CONFIG["batch_size"], help="Batch size per iterasi GPU")
@@ -345,6 +345,7 @@ def parse_args():
     parser.add_argument("--weight_decay", type=float, default=CONFIG["weight_decay"], help="Weight decay Adam")
     parser.add_argument("--experiment_code", type=str, default=CONFIG["experiment_code"], help="Kode/Folder eksperimen")
     parser.add_argument("--dry_run", action="store_true", help="Eksekusi mock test 1 batch lalu keluar tanpa training")
+    parser.add_argument("--eval_batch_size", type=int, default=CONFIG["eval_batch_size"], help="Batch size evaluasi")
     return parser.parse_args()
 
 if __name__ == "__main__":

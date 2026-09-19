@@ -27,58 +27,67 @@ class OrganCMNISTDataset(Dataset):
     return len(self.images)
 
   def __getitem__(self, idx):
-    return self.images[idx], self.labels[idx]
-
+    return self.images[idx], torch.as_tensor(self.labels[idx], dtype=torch.long).squeeze(-1)
 
 def get_organcmnist_loaders(
     npz_path="data/organcmnist_224.npz",
     batch_size=16,
+    eval_batch_size=None,
     num_workers=4,
     img_size=224,
 ):
-  train_dataset = OrganCMNISTDataset(npz_path, split="train")
-  val_dataset = OrganCMNISTDataset(npz_path, split="val")
-  test_dataset = OrganCMNISTDataset(npz_path, split="test")
+    if eval_batch_size is None:
+        eval_batch_size = batch_size * 8
 
-  use_persistent = num_workers > 0
-  dataloader_kwargs = {
-      "batch_size": batch_size,
-      "num_workers": num_workers,
-      "pin_memory": True,
-      "persistent_workers": use_persistent,
-  }
+    # 1. Dataset
+    train_dataset = OrganCMNISTDataset(npz_path, split="train")
+    val_dataset = OrganCMNISTDataset(npz_path, split="val")
+    test_dataset = OrganCMNISTDataset(npz_path, split="test")
 
-  if use_persistent:
-    dataloader_kwargs["prefetch_factor"] = 2
+    # 2. Kwargs umum DataLoader (tanpa batch_size)
+    use_persistent = num_workers > 0
+    base_kwargs = {
+        "num_workers": num_workers,
+        "pin_memory": True,
+        "persistent_workers": use_persistent,
+    }
+    if use_persistent:
+        base_kwargs["prefetch_factor"] = 2
 
-  train_loader = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
-  val_loader = DataLoader(val_dataset, shuffle=False, **dataloader_kwargs)
-  test_loader = DataLoader(test_dataset, shuffle=False, **dataloader_kwargs)
+    # 3. DataLoaders dengan pembagian batch_size & eval_batch_size
+    train_loader = DataLoader(
+        train_dataset, batch_size=batch_size, shuffle=True, **base_kwargs
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=eval_batch_size, shuffle=False, **base_kwargs
+    )
+    test_loader = DataLoader(
+        test_dataset, batch_size=eval_batch_size, shuffle=False, **base_kwargs
+    )
 
-  # 1. Transformasi GPU Training: augmentasi Crop/Flip pada gambar 224x224
-  gpu_train_transform = v2.Compose([
-      v2.ToDtype(torch.float32, scale=True),  # Convert uint8 -> float32 [0.0, 1.0] di GPU
-      v2.RandomResizedCrop(
-          (img_size, img_size), scale=(0.8, 1.0), antialias=True
-      ),
-      v2.RandomHorizontalFlip(p=0.5),
-  ])
+    # 4. Transformasi GPU
+    gpu_train_transform = v2.Compose([
+        v2.ToDtype(torch.float32, scale=True),  # uint8 -> float32 [0.0, 1.0]
+        v2.RandomResizedCrop(
+            (img_size, img_size), scale=(0.8, 1.0), antialias=True
+        ),
+        v2.RandomHorizontalFlip(p=0.5),
+    ])
 
-  # 2. Transformasi GPU Evaluation: Murni cast tipe data (TANPA RESIZE)
-  gpu_eval_transform = v2.Compose([
-      v2.ToDtype(torch.float32, scale=True),
-  ])
+    gpu_eval_transform = v2.Compose([
+        v2.ToDtype(torch.float32, scale=True),
+    ])
 
-  num_classes = 11
+    num_classes = 11
 
-  return (
-      train_loader,
-      val_loader,
-      test_loader,
-      num_classes,
-      gpu_train_transform,
-      gpu_eval_transform,
-  )
+    return (
+        train_loader,
+        val_loader,
+        test_loader,
+        num_classes,
+        gpu_train_transform,
+        gpu_eval_transform,
+    )
 
 
 if __name__ == "__main__":

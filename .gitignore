@@ -13,6 +13,8 @@ __pycache__/
 venv/
 env/
 
+sample-pretrain/
+
 # Datasets (File biner besar tidak cocok di-commit ke Git)
 data/*.npz
 data/*.npy
