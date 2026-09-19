@@ -1,4 +1,4 @@
-from patch import apply_mamba_patch
+from architectures.patch import apply_mamba_patch
 apply_mamba_patch()
 
 import torch

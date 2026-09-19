@@ -40,3 +40,5 @@ logs/
 wheels/*.whl
 wheels/
 data/
+
+debugger.py

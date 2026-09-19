@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch._dynamo
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingLR, SequentialLR
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -25,7 +26,7 @@ CONFIG = {
     "seed": 42,
     
     "npz_path": "data/organcmnist_224.npz",
-    "batch_size": 16,
+    "batch_size": 64,
     "eval_batch_size": 256,
     "accumulation_steps": 1,
     "num_workers": 12,
@@ -44,9 +45,10 @@ CONFIG = {
     "proj_dim": 256,
     
     "optimizer": "Adam",
-    "learning_rate": 1e-4,
+    "learning_rate": 2e-4,
     "weight_decay": 1e-4,
-    "max_epochs": 1,
+    "max_epochs": 6,
+    "warmup_epochs": 5,
     "early_stop_patience": 10,
     "early_stop_delta": 0.001,
 }
@@ -59,14 +61,15 @@ def run_mock_test(model, train_loader, device, gpu_transform):
     try:
         images, labels = next(iter(train_loader))
         images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
+        # Squeeze dimensi (B, 1) -> (B,) dan konversi ke long
+        labels = labels.to(device, non_blocking=True).view(-1).long()
 
         use_bf16 = torch.cuda.is_bf16_supported()
         amp_dtype = torch.bfloat16 if use_bf16 else torch.float16
 
         with torch.no_grad(), torch.autocast(device_type="cuda", dtype=amp_dtype):
             images = gpu_transform(images)
-            images = images.to(memory_format=torch.channels_last) # Dipindah ke sini
+            images = images.to(memory_format=torch.channels_last)
             outputs = model(images)
                     
         assert outputs.shape == (images.size(0), CONFIG["num_classes"]), "Shape output tidak sesuai!"
@@ -78,7 +81,7 @@ def run_mock_test(model, train_loader, device, gpu_transform):
         print(f"❌ Mock Test Gagal: {e}")
         raise e
 
-# 1. Hapus parameter 'scaler' dari definisi fungsi
+
 def train_one_epoch(model, dataloader, criterion, optimizer, device, gpu_transform, amp_dtype, use_bf16, scaler, accumulation_steps=1):
     model.train()
     running_loss = torch.tensor(0.0, device=device)
@@ -90,7 +93,8 @@ def train_one_epoch(model, dataloader, criterion, optimizer, device, gpu_transfo
 
     for i, (images, labels) in enumerate(pbar):
         images = images.to(device, non_blocking=True)
-        labels = labels.to(device, non_blocking=True)
+        # Squeeze dimensi (B, 1) -> (B,) dan konversi ke long
+        labels = labels.to(device, non_blocking=True).view(-1).long()
 
         with torch.no_grad():
             images = gpu_transform(images)
@@ -155,7 +159,8 @@ def evaluate(model, dataloader, criterion, device, gpu_transform):
     with torch.no_grad():
         for images, labels in dataloader:
             images = images.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True)
+            # Squeeze dimensi (B, 1) -> (B,) dan konversi ke long
+            labels = labels.to(device, non_blocking=True).view(-1).long()
 
             images = gpu_transform(images)
             images = images.to(memory_format=torch.channels_last) # Pastikan channels_last aktif
@@ -195,10 +200,34 @@ def run_training_pipeline(model, raw_model, loaders, transforms, amp_params, log
     amp_dtype, use_bf16, scaler = amp_params
 
     criterion = nn.CrossEntropyLoss()
+
+    base_lr = CONFIG["learning_rate"]
+    batch_size = CONFIG["batch_size"]
+    scaled_lr = base_lr * (batch_size / 16) ** 0.5
+
     optimizer = optim.Adam(
         model.parameters(),
-        lr=CONFIG["learning_rate"],
-        weight_decay=CONFIG["weight_decay"]
+        weight_decay=CONFIG["weight_decay"],
+        lr = scaled_lr
+    )
+
+    scheduler_warmup = LinearLR(
+        optimizer, 
+        start_factor=0.1, 
+        end_factor=1.0, 
+        total_iters=CONFIG["warmup_epochs"]
+    )
+
+    scheduler_decay = CosineAnnealingLR(
+        optimizer, 
+        T_max=CONFIG["max_epochs"] - CONFIG["warmup_epochs"], 
+        eta_min=1e-6
+    )
+
+    scheduler = SequentialLR(
+        optimizer,
+        schedulers=[scheduler_warmup, scheduler_decay],
+        milestones=[CONFIG["warmup_epochs"]]
     )
 
     best_val_loss = float("inf")
@@ -215,12 +244,15 @@ def run_training_pipeline(model, raw_model, loaders, transforms, amp_params, log
         val_loss, val_acc, val_eval = evaluate(
             model, val_loader, criterion, device, gpu_eval_transform
         )
+
+        scheduler.step()
         
         val_metrics, _ = logger.compute_metrics(*val_eval)
         val_f1 = val_metrics["global_metrics"]["f1_score_macro"]
+        current_lr = optimizer.param_groups[0]['lr']
 
         logger.log_epoch(epoch, train_loss, val_loss, train_acc, val_acc, val_f1)
-        print(f"Epoch [{epoch:03d}/{CONFIG['max_epochs']}] | "
+        print(f"Epoch [{epoch:03d}/{CONFIG['max_epochs']}] | LR: {current_lr:.6f} | "
               f"Train Loss: {train_loss:.4f} - Acc: {train_acc:.4f} | "
               f"Val Loss: {val_loss:.4f} - Acc: {val_acc:.4f} - F1: {val_f1:.4f}")
 
@@ -271,6 +303,8 @@ def main():
     CONFIG["learning_rate"] = args.learning_rate
     CONFIG["weight_decay"] = args.weight_decay
     CONFIG["experiment_code"] = args.experiment_code
+    CONFIG["warmup_epochs"] = args.warmup_epochs
+    CONFIG["eval_batch_size"] = args.eval_batch_size
 
     torch.manual_seed(CONFIG["seed"])
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -341,6 +375,7 @@ def parse_args():
     parser.add_argument("--accumulation_steps", type=int, default=CONFIG["accumulation_steps"], help="Langkah akumulasi gradien")
     parser.add_argument("--num_workers", type=int, default=CONFIG["num_workers"], help="Jumlah worker DataLoader")
     parser.add_argument("--max_epochs", type=int, default=CONFIG["max_epochs"], help="Jumlah maksimum epoch pelatihan")
+    parser.add_argument("--warmup_epochs", type=int, default=CONFIG["warmup_epochs"], help="Jumlah epoch LR warmup")
     parser.add_argument("--learning_rate", type=float, default=CONFIG["learning_rate"], help="Learning rate Adam")
     parser.add_argument("--weight_decay", type=float, default=CONFIG["weight_decay"], help="Weight decay Adam")
     parser.add_argument("--experiment_code", type=str, default=CONFIG["experiment_code"], help="Kode/Folder eksperimen")
