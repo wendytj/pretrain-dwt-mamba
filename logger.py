@@ -2,8 +2,13 @@ import os
 import json
 import numpy as np
 import pandas as pd
+
+# Wajib dipanggil sebelum import pyplot agar aman di server headless/non-GUI
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
+
 from sklearn.metrics import (
     confusion_matrix, accuracy_score, precision_score,
     recall_score, f1_score, roc_auc_score, cohen_kappa_score, matthews_corrcoef
@@ -21,15 +26,14 @@ class ExperimentLogger:
             'train_acc': [], 'val_acc': [], 'val_f1': []
         }
         
-        # Simpan hyperparameter secara terpisah jika diberikan
         if self.hparams:
             self.save_hparams()
 
     def save_hparams(self, filename="hparams.json"):
-        """Menyimpan konfigurasi hyperparameter ke JSON."""
+        """Menyimpan konfigurasi hyperparameter ke JSON dengan penanganan tipe data aman."""
         path = os.path.join(self.save_dir, filename)
         with open(path, 'w') as f:
-            json.dump(self.hparams, f, indent=4)
+            json.dump(self.hparams, f, indent=4, default=str)
         print(f"⚙️ Hyperparameters disimpan di: {path}")
 
     def log_epoch(self, epoch, train_loss, val_loss, train_acc, val_acc, val_f1):
@@ -50,10 +54,9 @@ class ExperimentLogger:
         return path
 
     def compute_metrics(self, y_true, y_pred, y_probs):
-        """Hitung Confusion Matrix NxN dan seluruh metrik turunan secara dinamis."""
+        """Hitung Confusion Matrix NxN dan seluruh metrik turunan secara presisi."""
         labels_idx = list(range(len(self.class_names)))
         
-        # Paksa labels agar dimensi CM dan per-class metrics selalu konsisten dengan len(class_names)
         cm = confusion_matrix(y_true, y_pred, labels=labels_idx)
 
         acc = accuracy_score(y_true, y_pred)
@@ -61,8 +64,9 @@ class ExperimentLogger:
         rec = recall_score(y_true, y_pred, average='macro', zero_division=0)
         f1 = f1_score(y_true, y_pred, average='macro', zero_division=0)
 
+        # ROC-AUC OvR dengan penanganan penentuan label eksplisit
         try:
-            auc = roc_auc_score(y_true, y_probs, multi_class='ovr', average='macro')
+            auc = roc_auc_score(y_true, y_probs, multi_class='ovr', average='macro', labels=labels_idx)
         except Exception:
             auc = 0.0
 
@@ -113,23 +117,28 @@ class ExperimentLogger:
 
         json_path = os.path.join(self.save_dir, filename)
         with open(json_path, 'w') as f:
-            json.dump(summary_json, f, indent=4)
+            json.dump(summary_json, f, indent=4, default=str)
 
         print(f"File snapshot JSON (Train/Val/Test) disimpan di: {json_path}")
         self.plot_confusion_matrix(cm_test, filename="test_confusion_matrix.png")
         return summary_json
 
     def plot_confusion_matrix(self, cm, filename="confusion_matrix.png"):
-        """Visualisasi Confusion Matrix NxN dinamis dengan penyesuaian skala canvas."""
+        """Visualisasi Confusion Matrix NxN dengan pengaturan font dinamis agar tidak berhimpitan."""
         n_classes = len(self.class_names)
-        fig_size = max(6, int(n_classes * 0.75))
+        fig_size = max(7, int(n_classes * 0.8))
+        font_size = max(6, 12 - int(n_classes * 0.4))
         
         plt.figure(figsize=(fig_size, fig_size))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-                    xticklabels=self.class_names, yticklabels=self.class_names)
+        sns.heatmap(
+            cm, annot=True, fmt='d', cmap='Blues',
+            xticklabels=self.class_names, yticklabels=self.class_names,
+            annot_kws={"size": font_size}
+        )
         plt.title(f'Confusion Matrix {n_classes}x{n_classes} (Test Set)', fontweight='bold')
         plt.xlabel('Predicted Class')
         plt.ylabel('True Class')
+        plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         plt.savefig(os.path.join(self.save_dir, filename), dpi=300)
         plt.close()

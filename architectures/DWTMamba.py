@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from mamba_ssm import Mamba  
 
 class HaarDWT2D(nn.Module):
-    """Mendekomposisi citra input menjadi 4 subband frekuensi: LL, LH, HL, HH."""
+    """Mendekomposisi citra input menjadi 4 subband frekuensi ter-vektorisasi."""
     def __init__(self, in_channels):
         super().__init__()
         self.in_channels = in_channels
@@ -24,21 +24,13 @@ class HaarDWT2D(nn.Module):
     def forward(self, x):
         B, C, H, W = x.shape
         out = F.conv2d(x, self.filters, stride=2, groups=C) # type: ignore
-        out = out.view(B, C, 4, H // 2, W // 2)
+        out = out.view(B, C, 4, H // 2, W // 2).permute(0, 2, 1, 3, 4)
 
-        LL = out[:, :, 0, :, :]
-        LH = out[:, :, 1, :, :]
-        HL = out[:, :, 2, :, :]
-        HH = out[:, :, 3, :, :]
+        sb_min = out.amin(dim=(-2, -1), keepdim=True)
+        sb_max = out.amax(dim=(-2, -1), keepdim=True)
+        out_norm = (out - sb_min) / (sb_max - sb_min + 1e-5)
 
-        subbands = []
-        for sb in [LL, LH, HL, HH]:
-            sb_min = sb.amin(dim=(-2, -1), keepdim=True)
-            sb_max = sb.amax(dim=(-2, -1), keepdim=True)
-            sb_norm = (sb - sb_min) / (sb_max - sb_min + 1e-5)
-            subbands.append(sb_norm)
-
-        return subbands
+        return out_norm  # Shape: [B, 4, C, H//2, W//2]
 
 class SqueezeAndExcitation(nn.Module):
     def __init__(self, channels, reduction=16):
@@ -54,8 +46,7 @@ class SqueezeAndExcitation(nn.Module):
 
     def forward(self, x):
         b, c, _, _ = x.shape
-        w = self.fc(x).view(b, c, 1, 1)
-        return x * w
+        return self.fc(x).view(b, c, 1, 1)
 
 def channel_shuffle(x, groups):
     batchsize, num_channels, height, width = x.size()
@@ -104,15 +95,16 @@ class SpaSE_SSM(nn.Module):
 
         x_norm = self.norm(x_ssm.permute(0, 2, 3, 1)) 
 
-        x_row = x_norm.reshape(B * H, W, self.half_dim)
+        x_row = x_norm.reshape(B * H, W, self.half_dim).contiguous()
         y_row = self.row_mamba(x_row)
         y_row = y_row.reshape(B, H, W, self.half_dim)
 
-        x_col = y_row.permute(0, 2, 1, 3).reshape(B * W, H, self.half_dim)
+        x_col = y_row.permute(0, 2, 1, 3).reshape(B * W, H, self.half_dim).contiguous()
         y_col = self.col_mamba(x_col)
-        y_col = y_col.reshape(B, W, H, self.half_dim).permute(0, 2, 1, 3)
 
-        y_ssm = y_col.permute(0, 3, 1, 2)
+        y_col = y_col.reshape(B, W, H, self.half_dim).permute(0, 2, 1, 3).contiguous()
+        y_ssm = y_col.permute(0, 3, 1, 2) 
+
         a_ssm = self.se(y_ssm)
         o_ssm = y_ssm * a_ssm
 
@@ -121,11 +113,10 @@ class SpaSE_SSM(nn.Module):
         return y_shuff + x
 
 class MB_GSF(nn.Module):
-    """Menggabungkan fitur dari 4 cabang subband DWT (LL, LH, HL, HH)."""
+    """Menggabungkan fitur 4 subband DWT secara ter-vektorisasi tanpa Python loop."""
     def __init__(self, dim, reduction=4):
         super().__init__()
         self.dim = dim
-        self.gap = nn.AdaptiveAvgPool2d(1)
 
         self.gate_fc = nn.Sequential(
             nn.Linear(dim, max(1, dim // reduction)),
@@ -137,25 +128,29 @@ class MB_GSF(nn.Module):
         self.proj = nn.Conv2d(dim * 4, dim, kernel_size=1)
         self.ln = nn.LayerNorm(dim)
 
-    def forward(self, branch_features):
-        recalibrated = []
-        for f in branch_features:
-            v = self.gap(f).view(f.size(0), -1)
-            g = self.gate_fc(v).view(f.size(0), f.size(1), 1, 1)
-            recalibrated.append(f * g)
+    def forward(self, x_5d):
+        # x_5d: [B, 4, C, H, W]
+        B, N, C, H, W = x_5d.shape
 
-        f_cat = torch.cat(recalibrated, dim=1)
+        # Global Average Pooling paralel [B, 4, C]
+        v = x_5d.mean(dim=(-2, -1))
+        
+        # Gated Channel Recalibration paralel [B, 4, C, 1, 1]
+        g = self.gate_fc(v).view(B, N, C, 1, 1)
+        recalibrated = x_5d * g
+
+        # Concatenation & Channel Shuffle
+        f_cat = recalibrated.view(B, N * C, H, W)
         f_shuff = channel_shuffle(f_cat, groups=4)
         f_proj = self.proj(f_shuff)
 
-        f_sum = sum(recalibrated)
+        # Residual Sum & LayerNorm
+        f_sum = recalibrated.sum(dim=1)
         f_fused = f_proj + f_sum
 
-        f_out = self.ln(f_fused.permute(0, 2, 3, 1)).permute(0, 3, 1, 2)
-        return f_out
+        return self.ln(f_fused.permute(0, 2, 3, 1)).permute(0, 3, 1, 2).contiguous()
 
 class LatentEncoder(nn.Module):
-    """Mengekstrak fitur global laten langsung dari citra asli."""
     def __init__(self, in_channels, latent_dim=128):
         super().__init__()
         self.net = nn.Sequential(
@@ -224,17 +219,32 @@ class DWTMamba(nn.Module):
         self.proj_latent = nn.Linear(latent_dim, proj_dim)
         self.classifier = nn.Linear(proj_dim * 2, num_classes)
 
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, (nn.Conv2d, nn.Linear)):
+            nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, (nn.BatchNorm2d, nn.LayerNorm)):
+            if m.weight is not None:
+                nn.init.constant_(m.weight, 1.0)
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+
     def forward(self, x):
-        subbands = self.dwt(x)
+        subbands = self.dwt(x) # Output DWT: [B, 4, C, H//2, W//2]
 
         branch_outputs = []
         for i in range(4):
-            feat = self.pe_branches[i](subbands[i])
-            feat = self.spase_branches[i](feat)
-            feat = self.pm_branches[i](feat)
-            branch_outputs.append(feat)
+            f = self.pe_branches[i](subbands[:, i])
+            f = self.spase_branches[i](f)
+            f = self.pm_branches[i](f)
+            branch_outputs.append(f)
 
-        f_fused = self.mb_gsf(branch_outputs)
+        feat_5d = torch.stack(branch_outputs, dim=1)
+
+        f_fused = self.mb_gsf(feat_5d)
         f_global = self.gap(f_fused).view(f_fused.size(0), -1)
         u_fused = self.proj_fused(f_global)
 
@@ -266,7 +276,7 @@ if __name__ == "__main__":
     output = model(dummy_input)
     print("✅ Testing DWT-Mamba dengan Fleksibilitas Hyperparameter Selesai!")
     print(f"📦 Input Shape  : {dummy_input.shape}")
-    print(f"🎯 Output Shape : {output.shape} (Batch Size=2, Classes=3)")
+    print(f"🎯 Output Shape : {output.shape}")
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

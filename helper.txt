@@ -51,6 +51,13 @@ cd pretrain-dwt-mamba
 pip install --no-deps https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.7.0/causal_conv1d-1.7.0+cu12torch2.6cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 pip install --no-deps https://github.com/state-spaces/mamba/releases/download/v2.3.2.post1/mamba_ssm-2.3.2.post1+cu12torch2.6cxx11abiTRUE-cp311-cp311-linux_x86_64.whl
 pip install einops huggingface_hub transformers pandas scikit-learn matplotlib seaborn gdown
+mkdir -p data
+gdown 1y-CjRsE9K9MbVQMPR2nN_MHdQ9fiKGV_ -O data/organcmnist_224.npz
+
+
+
+
+
 gdown --fuzzy "https://drive.google.com/file/d/1y-CjRsE9K9MbVQMPR2nN_MHdQ9fiKGV_/view?usp=sharing" -O data/organcmnist_224.npz
 
 
@@ -60,6 +67,8 @@ aria2c -x 16 -s 16 --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?e
 pip install --no-deps triton
 
 
+apt-get update && apt-get install -y nano
+nano /workspace/pretrain-dwt-mamba/loaders/OrganCMNISTLoader.py
 
 
 
