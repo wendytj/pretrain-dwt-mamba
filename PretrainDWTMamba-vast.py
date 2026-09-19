@@ -33,8 +33,8 @@ CONFIG = {
     
     # Arsitektur DWT-Mamba
     "in_channels": 1,
-    "embed_dim": 768,
-    "depth": 4,
+    "embed_dim": 256,
+    "depth": 3,
     "mamba_d_state": 16,
     "mamba_d_conv": 4,
     "mamba_expand": 2,

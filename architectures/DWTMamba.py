@@ -1,4 +1,4 @@
-from architectures.patch import apply_mamba_patch
+from patch import apply_mamba_patch
 apply_mamba_patch()
 
 import torch
@@ -262,8 +262,8 @@ if __name__ == "__main__":
     model = DWTMamba(
         in_channels=1,
         num_classes=3,
-        embed_dim=768,
-        depth=4,
+        embed_dim=256,
+        depth=3,
         mamba_d_state=16,
         mamba_d_conv=4,
         mamba_expand=2,
