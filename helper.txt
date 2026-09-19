@@ -70,5 +70,11 @@ pip install --no-deps triton
 apt-get update && apt-get install -y nano
 nano /workspace/pretrain-dwt-mamba/loaders/OrganCMNISTLoader.py
 
+python PretrainDWTMamba-vast.py --dry_run
+
+
+tmux new -s train "python PretrainDWTMamba-vast.py"
+
+tmux new -s train "python PretrainDWTMamba-vast.py --num_workers 16"
 
 

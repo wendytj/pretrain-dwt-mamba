@@ -184,7 +184,7 @@ def run_training_pipeline(model, raw_model, loaders, transforms, amp_params, log
             model, val_loader, criterion, device, gpu_eval_transform
         )
         
-        _, val_metrics = logger.compute_metrics(*val_eval)
+        val_metrics, _ = logger.compute_metrics(*val_eval)
         val_f1 = val_metrics["global_metrics"]["f1_score_macro"]
 
         logger.log_epoch(epoch, train_loss, val_loss, train_acc, val_acc, val_f1)
@@ -282,6 +282,10 @@ def main():
     ).to(device).to(memory_format=torch.channels_last) # type: ignore
 
     raw_model = model
+
+    if hasattr(torch, 'compile'):
+        print("⚡ Mengaktifkan PyTorch 2.0 Torch Compile...")
+        model = torch.compile(model)
 
     # 4. Mode Percabangan: Dry-Run vs Full Training
     if args.dry_run:
