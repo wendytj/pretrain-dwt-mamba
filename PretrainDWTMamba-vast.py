@@ -308,7 +308,7 @@ CONFIG = {
     "npz_path": "data/organcmnist_224.npz",
     "batch_size": 16,
     "accumulation_steps": 1,
-    "num_workers": 4,
+    "num_workers": 12,
     "img_size": 224,
     
     # Arsitektur DWT-Mamba
