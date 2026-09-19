@@ -79,3 +79,8 @@ tmux new -s train "python PretrainDWTMamba-vast.py --num_workers 16"
 
 
 scp -P 50353 root@77.48.24.203:/workspace/pretrain-dwt-mamba/logs/exp-organcmnist-dwtmamba-v1.tar.gz ./
+
+
+watch -n 1 nvidia-smi
+
+cat train.py untuk lihat isi file

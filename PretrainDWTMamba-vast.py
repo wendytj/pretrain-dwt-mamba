@@ -45,7 +45,7 @@ CONFIG = {
     "proj_dim": 256,
     
     "optimizer": "Adam",
-    "learning_rate": 2e-4,
+    "learning_rate": 1e-4,
     "weight_decay": 1e-4,
     "max_epochs": 6,
     "warmup_epochs": 5,
@@ -208,7 +208,8 @@ def run_training_pipeline(model, raw_model, loaders, transforms, amp_params, log
     optimizer = optim.Adam(
         model.parameters(),
         weight_decay=CONFIG["weight_decay"],
-        lr = scaled_lr
+        lr = scaled_lr,
+        eps=1e-7
     )
 
     scheduler_warmup = LinearLR(
